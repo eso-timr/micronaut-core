@@ -16,7 +16,9 @@
 package io.micronaut.http.client
 
 import io.micronaut.http.HttpResponse
+import io.micronaut.http.HttpStatus
 import io.micronaut.http.annotation.Controller
+import io.micronaut.http.annotation.Error
 import io.micronaut.http.annotation.Get
 import io.micronaut.http.client.annotation.Client
 import io.micronaut.http.client.exceptions.HttpClientResponseException
@@ -97,6 +99,28 @@ class ServerErrorSpec extends Specification {
         e.message == "Internal Server Error"
     }
 
+    void "test first failed item of flowable is routed to error route"() {
+        when:
+        myClient.flowableErrorHandled()
+
+        then:
+        def e = thrown(HttpClientResponseException)
+        e.status == HttpStatus.BAD_REQUEST
+        e.response.getBody(String).orElse(null) == "Illegal request"
+    }
+
+    void "test failed Single is routed to error route"() {
+        when:
+        myClient.singleErrorHandled()
+
+        then:
+        def e = thrown(HttpClientResponseException)
+        e.status == HttpStatus.BAD_REQUEST
+        e.response.getBody(String).orElse(null) == "Illegal request"
+    }
+
+
+
     @Client('/server-errors')
     static interface MyClient {
         @Get('/five-hundred')
@@ -119,6 +143,12 @@ class ServerErrorSpec extends Specification {
 
         @Get('/flowable-error')
         Flowable flowableErrorFlowable()
+
+        @Get('/flowable-error-handled')
+        HttpResponse flowableErrorHandled()
+
+        @Get('/single-error-handled')
+        HttpResponse singleErrorHandled()
     }
 
     @Controller('/server-errors')
@@ -143,6 +173,21 @@ class ServerErrorSpec extends Specification {
         @Get('/flowable-error')
         Flowable flowableError() {
             Flowable.error(new RuntimeException("Bad things happening"))
+        }
+
+        @Get('/flowable-error-handled')
+        Flowable flowableErrorHandled() {
+            Flowable.error(new IllegalArgumentException("Illegal request"))
+        }
+
+        @Get('/single-error-handled')
+        Single singleErrorHandled() {
+            Single.error(new IllegalArgumentException("Illegal request"))
+        }
+
+        @Error(IllegalArgumentException.class)
+        HttpResponse handleError(IllegalArgumentException e) {
+            HttpResponse.badRequest(e.message)
         }
 
     }

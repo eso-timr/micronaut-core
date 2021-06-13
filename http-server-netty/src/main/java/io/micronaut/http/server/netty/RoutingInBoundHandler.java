@@ -1372,19 +1372,57 @@ class RoutingInBoundHandler extends SimpleChannelInboundHandler<io.micronaut.htt
                                 httpContentPublisher = Flowable.fromPublisher(httpContentPublisher)
                                         .doAfterTerminate(() -> cleanupRequest(context, request));
 
-                                DelegateStreamedHttpResponse streamedResponse = new DelegateStreamedHttpResponse(
-                                        toNettyResponse(message).toHttpResponse(),
-                                        httpContentPublisher
-                                );
-                                io.netty.handler.codec.http.HttpHeaders headers = streamedResponse.headers();
-                                headers.set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
-                                headers.set(HttpHeaderNames.CONTENT_TYPE, mediaType);
+                                httpContentPublisher.subscribe(new CompletionAwareSubscriber<HttpContent>() {
+                                    private final AtomicBoolean messageSent = new AtomicBoolean(false);
+                                    private UnicastProcessor<HttpContent> httpContentPublisher;
 
-                                if (isHttp2) {
-                                    addHttp2StreamHeader(request, streamedResponse);
-                                }
-                                context.writeAndFlush(streamedResponse);
-                                context.read();
+                                    @Override
+                                    protected void doOnSubscribe(Subscription subscription) {
+                                        this.httpContentPublisher = UnicastProcessor.create(1, subscription::cancel);
+                                        subscription.request(1);
+                                    }
+
+                                    @Override
+                                    protected void doOnNext(HttpContent msg) {
+                                        if (messageSent.compareAndSet(false, true)) {
+                                            writeResponse();
+                                        }
+                                        httpContentPublisher.onNext(msg);
+                                        subscription.request(1);
+                                    }
+
+                                    @Override
+                                    protected void doOnError(Throwable t) {
+                                        if (messageSent.compareAndSet(false, true)) {
+                                            exceptionCaughtInternal(context, t, request, false);
+                                        }
+                                        httpContentPublisher.onError(t);
+                                    }
+
+                                    @Override
+                                    protected void doOnComplete() {
+                                        if (messageSent.compareAndSet(false, true)) {
+                                            writeResponse();
+                                        }
+                                        httpContentPublisher.onComplete();
+                                    }
+
+                                    private void writeResponse() {
+                                        DelegateStreamedHttpResponse streamedResponse = new DelegateStreamedHttpResponse(
+                                                toNettyResponse(message).toHttpResponse(),
+                                                httpContentPublisher
+                                        );
+                                        io.netty.handler.codec.http.HttpHeaders headers = streamedResponse.headers();
+                                        headers.set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
+                                        headers.set(HttpHeaderNames.CONTENT_TYPE, mediaType);
+
+                                        if (isHttp2) {
+                                            addHttp2StreamHeader(request, streamedResponse);
+                                        }
+                                        context.writeAndFlush(streamedResponse);
+                                        context.read();
+                                    }
+                                });
                             }
                         }
 

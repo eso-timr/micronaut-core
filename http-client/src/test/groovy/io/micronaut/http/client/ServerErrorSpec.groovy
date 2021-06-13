@@ -109,6 +109,15 @@ class ServerErrorSpec extends Specification {
         e.response.getBody(String).orElse(null) == "Illegal request"
     }
 
+    void "test n-th failed item of flowable"() {
+        when:
+        myClient.flowableLateError()
+
+        then:
+        def e = thrown(HttpClientResponseException)
+        e.status == HttpStatus.OK
+    }
+
     void "test failed Single is routed to error route"() {
         when:
         myClient.singleErrorHandled()
@@ -118,8 +127,6 @@ class ServerErrorSpec extends Specification {
         e.status == HttpStatus.BAD_REQUEST
         e.response.getBody(String).orElse(null) == "Illegal request"
     }
-
-
 
     @Client('/server-errors')
     static interface MyClient {
@@ -146,6 +153,9 @@ class ServerErrorSpec extends Specification {
 
         @Get('/flowable-error-handled')
         HttpResponse flowableErrorHandled()
+
+        @Get('/flowable-late-error')
+        HttpResponse flowableLateError()
 
         @Get('/single-error-handled')
         HttpResponse singleErrorHandled()
@@ -178,6 +188,11 @@ class ServerErrorSpec extends Specification {
         @Get('/flowable-error-handled')
         Flowable flowableErrorHandled() {
             Flowable.error(new IllegalArgumentException("Illegal request"))
+        }
+
+        @Get('/flowable-late-error')
+        Flowable flowableLateError() {
+            Flowable.concat(Flowable.just("{}"), Flowable.error(new IllegalArgumentException("Bad things happening")))
         }
 
         @Get('/single-error-handled')
